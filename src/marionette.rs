@@ -1,21 +1,26 @@
-use rustc_serialize::json;
+use hyper::method::Method;
+use mozprofile::preferences::{PrefValue};
+use mozprofile::profile::Profile;
+use mozrunner::runner::{Runner, FirefoxRunner};
+use regex::Captures;
+use rustc_serialize::base64::FromBase64;
 use rustc_serialize::json::{Json, ToJson};
+use rustc_serialize::json;
 use std::collections::BTreeMap;
-use std::io::prelude::*;
-use std::io::Result as IoResult;
+use std::error::Error;
+use std::fs;
+use std::io::BufWriter;
+use std::io::Cursor;
 use std::io::Error as IoError;
 use std::io::ErrorKind;
-use std::error::Error;
+use std::io::Result as IoResult;
+use std::io::prelude::*;
+use std::io;
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
-use hyper::method::Method;
-use regex::Captures;
-use mozrunner::runner::{Runner, FirefoxRunner};
-use mozprofile::preferences::{PrefValue};
-
 use webdriver::command::{WebDriverCommand, WebDriverMessage, Parameters,
                          WebDriverExtensionCommand};
 use webdriver::command::WebDriverCommand::{
@@ -32,7 +37,7 @@ use webdriver::command::WebDriverCommand::{
     DeleteCookies, DeleteCookie, SetTimeouts, DismissAlert,
     AcceptAlert, GetAlertText, SendAlertText, TakeScreenshot, Extension};
 use webdriver::command::{
-    GetParameters, WindowSizeParameters, SwitchToWindowParameters,
+    CapabilitiesParameters, GetParameters, WindowSizeParameters, SwitchToWindowParameters,
     SwitchToFrameParameters, LocatorParameters, JavascriptCommandParameters,
     GetCookieParameters, AddCookieParameters, TimeoutsParameters,
     TakeScreenshotParameters};
@@ -45,6 +50,7 @@ use webdriver::error::{
     WebDriverResult, WebDriverError, ErrorStatus};
 use webdriver::server::{WebDriverHandler, Session};
 use webdriver::httpapi::{WebDriverExtensionRoute};
+use zip;
 
 pub fn extension_routes() -> Vec<(Method, &'static str, GeckoExtensionRoute)> {
     return vec![(Method::Get, "/session/{sessionId}/moz/context", GeckoExtensionRoute::GetContext),
@@ -161,7 +167,7 @@ pub static NON_E10S_PREFERENCES: [(&'static str, PrefValue); 2] = [
     ("browser.tabs.remote.autostart.2", PrefValue::PrefBool(false))
 ];
 
-pub static FIREFOX_PREFERENCES: [(&'static str, PrefValue); 48] = [
+pub static FIREFOX_DEFAULT_PREFERENCES: [(&'static str, PrefValue); 43] = [
     ("app.update.auto", PrefValue::PrefBool(false)),
     ("app.update.enabled", PrefValue::PrefBool(false)),
     ("browser.displayedE10SPrompt.1", PrefValue::PrefInt(5)),
@@ -179,9 +185,7 @@ pub static FIREFOX_PREFERENCES: [(&'static str, PrefValue); 48] = [
     ("browser.sessionstore.resume_from_crash", PrefValue::PrefBool(false)),
     ("browser.shell.checkDefaultBrowser", PrefValue::PrefBool(false)),
     ("browser.startup.page", PrefValue::PrefInt(0)),
-    ("browser.tabs.warnOnClose", PrefValue::PrefBool(false)),
     ("browser.tabs.warnOnOpen", PrefValue::PrefBool(false)),
-    ("browser.warnOnQuit", PrefValue::PrefBool(false)),
     ("datareporting.healthreport.logging.consoleEnabled", PrefValue::PrefBool(false)),
     ("datareporting.healthreport.service.enabled", PrefValue::PrefBool(false)),
     ("datareporting.healthreport.service.firstRun", PrefValue::PrefBool(false)),
@@ -189,12 +193,8 @@ pub static FIREFOX_PREFERENCES: [(&'static str, PrefValue); 48] = [
     ("datareporting.policy.dataSubmissionEnabled", PrefValue::PrefBool(false)),
     ("datareporting.policy.dataSubmissionPolicyAccepted", PrefValue::PrefBool(false)),
     ("devtools.errorconsole.enabled", PrefValue::PrefBool(true)),
-    // until bug 1238095 is fixed, we have to allow CPOWs
-    ("dom.ipc.cpows.forbid-unsafe-from-browser", PrefValue::PrefBool(false)),
     ("dom.ipc.reportProcessHangs", PrefValue::PrefBool(false)),
     ("focusmanager.testmode", PrefValue::PrefBool(true)),
-    ("marionette.defaultPrefs.enabled", PrefValue::PrefBool(true)),
-    ("marionette.logging", PrefValue::PrefBool(true)),
     ("security.fileuri.origin_policy", PrefValue::PrefInt(3)),
     ("security.fileuri.strict_origin_policy", PrefValue::PrefBool(false)),
     ("security.warn_entering_secure", PrefValue::PrefBool(false)),
@@ -211,6 +211,15 @@ pub static FIREFOX_PREFERENCES: [(&'static str, PrefValue); 48] = [
     ("toolkit.telemetry.enabled", PrefValue::PrefBool(false)),
     ("toolkit.telemetry.prompted", PrefValue::PrefInt(2)),
     ("toolkit.telemetry.rejected", PrefValue::PrefBool(true)),
+];
+
+pub static FIREFOX_REQUIRED_PREFERENCES: [(&'static str, PrefValue); 5] = [
+    ("browser.tabs.warnOnClose", PrefValue::PrefBool(false)),
+    ("browser.warnOnQuit", PrefValue::PrefBool(false)),
+    // until bug 1238095 is fixed, we have to allow CPOWs
+    ("dom.ipc.cpows.forbid-unsafe-from-browser", PrefValue::PrefBool(false)),
+    ("marionette.defaultPrefs.enabled", PrefValue::PrefBool(true)),
+    ("marionette.logging", PrefValue::PrefBool(true)),
 ];
 
 pub enum BrowserLauncher {
@@ -253,8 +262,10 @@ impl MarionetteHandler {
         }
     }
 
-    fn create_connection(&mut self, session_id: &Option<String>) -> WebDriverResult<()> {
-        try!(self.start_browser());
+    fn create_connection(&mut self, session_id: &Option<String>,
+                         capabilities: &CapabilitiesParameters) -> WebDriverResult<()> {
+        let profile = try!(self.load_profile(capabilities));
+        try!(self.start_browser(profile));
         debug!("Creating connection");
         let mut connection = MarionetteConnection::new(self.port, session_id.clone());
         debug!("Starting marionette connection");
@@ -264,20 +275,24 @@ impl MarionetteHandler {
         Ok(())
     }
 
-    fn start_browser(&mut self) -> IoResult<()> {
+    fn start_browser(&mut self, profile: Option<Profile>) -> IoResult<()> {
+        let custom_profile = profile.is_some();
 
         match self.launcher {
             BrowserLauncher::BinaryLauncher(ref binary) => {
-                let mut runner = try!(FirefoxRunner::new(&binary, None));
+                let mut runner = try!(FirefoxRunner::new(&binary, profile));
                 runner.profile.preferences.insert("marionette.defaultPrefs.port", PrefValue::PrefInt(self.port as isize));
-    runner.profile.preferences.insert("startup.homepage_welcome_url", PrefValue::PrefString("about:blank".to_string()));
-                if self.e10s {
-                    runner.profile.preferences.insert_vec(&E10S_PREFERENCES);
-                } else {
-                    runner.profile.preferences.insert_vec(&NON_E10S_PREFERENCES);
-                }
-                runner.profile.preferences.insert_vec(&FIREFOX_PREFERENCES);
 
+                runner.profile.preferences.insert_vec(&FIREFOX_REQUIRED_PREFERENCES);
+                if !custom_profile {
+                    runner.profile.preferences.insert_vec(&FIREFOX_DEFAULT_PREFERENCES);
+                    runner.profile.preferences.insert("startup.homepage_welcome_url", PrefValue::PrefString("about:blank".to_string()));
+                    if self.e10s {
+                        runner.profile.preferences.insert_vec(&E10S_PREFERENCES);
+                    } else {
+                        runner.profile.preferences.insert_vec(&NON_E10S_PREFERENCES);
+                    }
+                };
                 try!(runner.start());
 
                 self.browser = Some(runner);
@@ -289,18 +304,68 @@ impl MarionetteHandler {
 
         Ok(())
     }
+
+    fn load_profile(&self, capabilities: &CapabilitiesParameters) -> WebDriverResult<Option<Profile>> {
+        let profile_opt = capabilities.get("firefox_profile");
+        if profile_opt.is_none() {
+            return Ok(None);
+        }
+        debug!("Using custom profile");
+        let profile_json = profile_opt.unwrap();
+        let profile_base64 = try!(profile_json.as_string().ok_or(
+            WebDriverError::new(
+                ErrorStatus::UnknownError,
+                "Profile was not a string")));
+        let profile_zip = &*try!(profile_base64.from_base64());
+        // Create an emtpy profile directory
+        let profile = try!(Profile::new(None));
+        try!(unzip_buffer(profile_zip,
+                          profile.temp_dir.as_ref().expect("Profile doesn't have a path").path()));
+        // TODO - Stop mozprofile erroring if user.js already exists
+        Ok(Some(profile))
+    }
+}
+
+fn unzip_buffer(buf: &[u8], dest_dir: &Path) -> WebDriverResult<()> {
+    let reader = Cursor::new(buf);
+    let mut zip = try!(zip::ZipArchive::new(reader).map_err(|_| {
+        WebDriverError::new(
+            ErrorStatus::UnknownError,
+            "Failed to unzip profile")
+    }));
+    for i in 0..zip.len() {
+        let mut file = try!(zip.by_index(i).map_err(|_| {
+            WebDriverError::new(
+                ErrorStatus::UnknownError,
+                "Processing zip file failed")
+        }));
+        let unzip_path = {
+            let rel_path = Path::new(file.name());
+            let unzip_path = dest_dir.join(rel_path);
+            if let Some(dir) = unzip_path.parent() {
+                if !dir.exists() {
+                    try!(fs::create_dir_all(dir));
+                }
+            }
+            unzip_path
+        };
+        let dest = try!(fs::File::create(unzip_path));
+        let mut writer = BufWriter::new(dest);
+        try!(io::copy(&mut file, &mut writer));
+    }
+    Ok(())
 }
 
 impl WebDriverHandler<GeckoExtensionRoute> for MarionetteHandler {
     fn handle_command(&mut self, _: &Option<Session>, msg: &WebDriverMessage<GeckoExtensionRoute>) -> WebDriverResult<WebDriverResponse> {
-        let mut create_connection = false;
+        let mut new_capabilities = None;
         match self.connection.lock() {
             Ok(ref mut connection) => {
                 if connection.is_none() {
                     match msg.command {
-                        NewSession => {
+                        NewSession(ref capabilities) => {
                             debug!("Got NewSession command");
-                            create_connection = true;
+                            new_capabilities = Some(capabilities)
                         },
                         _ => {
                             return Err(WebDriverError::new(
@@ -316,8 +381,8 @@ impl WebDriverHandler<GeckoExtensionRoute> for MarionetteHandler {
                     "Failed to aquire marionette connection"))
             }
         }
-        if create_connection {
-            try!(self.create_connection(&msg.session_id));
+        if let Some(capabilities) = new_capabilities {
+            try!(self.create_connection(&msg.session_id, &capabilities));
         }
         match self.connection.lock() {
             Ok(ref mut connection) => {
@@ -374,7 +439,7 @@ impl MarionetteSession {
     pub fn update(&mut self, msg: &WebDriverMessage<GeckoExtensionRoute>,
                   resp: &MarionetteResponse) -> WebDriverResult<()> {
         match msg.command {
-            NewSession => {
+            NewSession(_) => {
                 let session_id = try_opt!(
                     try_opt!(resp.result.find("sessionId"),
                              ErrorStatus::SessionNotCreated,
@@ -538,7 +603,7 @@ impl MarionetteSession {
                              "Failed to find value field")));
                 WebDriverResponse::Generic(ValueResponse::new(element.to_json()))
             },
-            NewSession => {
+            NewSession(_) => {
                 let mut session_id = try_opt!(
                     try_opt!(resp.result.find("sessionId"),
                              ErrorStatus::InvalidSessionId,
@@ -683,7 +748,7 @@ impl MarionetteCommand {
 
     fn from_webdriver_message(id: u64, msg: &WebDriverMessage<GeckoExtensionRoute>) -> WebDriverResult<MarionetteCommand> {
         let (opt_name, opt_parameters) = match msg.command {
-            NewSession => {
+            NewSession(_) => {
                 let mut data = BTreeMap::new();
                 data.insert("sessionId".to_string(), Json::Null);
                 data.insert("capabilities".to_string(), Json::Null);

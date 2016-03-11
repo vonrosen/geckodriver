@@ -9,6 +9,7 @@ extern crate regex;
 extern crate rustc_serialize;
 #[macro_use]
 extern crate webdriver;
+extern crate zip;
 
 use std::borrow::ToOwned;
 use std::process::exit;
