@@ -34,13 +34,14 @@ use webdriver::command::WebDriverCommand::{
     GetElementText, GetElementTagName, GetElementRect, IsEnabled,
     ElementClick, ElementTap, ElementClear, ElementSendKeys,
     ExecuteScript, ExecuteAsyncScript, GetCookies, GetCookie, AddCookie,
-    DeleteCookies, DeleteCookie, SetTimeouts, DismissAlert,
+    DeleteCookies, DeleteCookie, SetTimeouts, PerformActions, DeleteActions, DismissAlert,
     AcceptAlert, GetAlertText, SendAlertText, TakeScreenshot, Extension};
 use webdriver::command::{
     NewSessionParameters, GetParameters, WindowSizeParameters, SwitchToWindowParameters,
     SwitchToFrameParameters, LocatorParameters, JavascriptCommandParameters,
     GetCookieParameters, AddCookieParameters, TimeoutsParameters,
-    TakeScreenshotParameters};
+    TakeScreenshotParameters, ActionsParameters, Action, PauseAction, KeyAction,
+    PointerAction, KeyActionType, PointerActionType};
 use webdriver::response::{
     WebDriverResponse, NewSessionResponse, ValueResponse, WindowSizeResponse,
     ElementRectResponse, CookieResponse, Cookie};
@@ -117,6 +118,16 @@ lazy_static! {
         ("marionette.defaultPrefs.enabled", Pref::new(true)),
         ("marionette.logging", Pref::new(true)),
     ];
+}
+
+// Trait for converting top-level commands to marionette data
+trait ToMarionette {
+    fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>>;
+}
+
+// Trait for converting sub-parts of commands to marionette data
+trait ToMarionetteJson {
+    fn to_marionette_json(&self) -> Json;
 }
 
 pub fn extension_routes() -> Vec<(Method, &'static str, GeckoExtensionRoute)> {
@@ -221,7 +232,7 @@ impl ToMarionette for GeckoContextParameters {
     fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>> {
         let mut data = BTreeMap::new();
         data.insert("value".to_owned(), self.context.to_json());
-        Ok(data)
+        Ok(Json::Object(data))
     }
 }
 
@@ -1181,10 +1192,6 @@ impl MarionetteConnection {
     }
 }
 
-trait ToMarionette {
-    fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>>;
-}
-
 impl ToMarionette for GetParameters {
     fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>> {
         Ok(try_opt!(self.to_json().as_object(), ErrorStatus::UnknownError, "Expected an object").clone())
@@ -1279,6 +1286,55 @@ impl ToMarionette for TakeScreenshotParameters {
         };
         data.insert("element".to_string(), element);
         Ok(data)
+    }
+}
+
+impl ToMarionette for ActionsParameters {
+    fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>> {
+        let mut data = BTreeMap::new();
+        let key = if (self.actions.len() == 1) {
+            data.insert("nextId".to_owned(),
+                        Json::Null);
+            "chain"
+        } else {
+            let max_length = self.actions.map(|x| x.len()).max().to_json();
+            data.insert("max_length", max_length);
+            "value"
+        };
+        data.insert(key.into(),
+                    self.actions.map(|x| {
+                        Json::Array(x.map(|y| Json::Object(y.to_marionette_json())))
+                    }))
+    }
+}
+
+impl ToMarionetteJson for Action {
+    fn to_marionette_json(&self) -> Json {
+        match self {
+            &Action::Pause(x) => x.to_marionette_json(),
+            &Action::Key(x) => x.to_marionette_json(),
+            &Action::Pointer(x) => x.to_marionette_json(),
+        }
+    }
+}
+
+impl ToMarionetteJson for PauseAction {
+    fn to_marionette_json(&self) -> Json {
+        let data = vec!["wait".to_owned().to_json(), self.duration.to_json()];
+        Json::Array(data)
+    }
+}
+
+impl ToMarionetteJson for KeyAction {
+    fn to_marionette_json(&self) -> Json {
+        let action_type = match self.action_type {
+            KeyActionType::Up => "keyUp",
+            KeyActionType::Down => "keyDown",
+        }.to_owned().to_json();
+        let value = String::with_capacity(1);
+        value.push(self.value);
+        let data = vec![action_type, value.to_json()];
+        Json::Array(data)
     }
 }
 
