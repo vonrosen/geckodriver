@@ -40,8 +40,10 @@ use webdriver::command::{
     NewSessionParameters, GetParameters, WindowSizeParameters, SwitchToWindowParameters,
     SwitchToFrameParameters, LocatorParameters, JavascriptCommandParameters,
     GetCookieParameters, AddCookieParameters, TimeoutsParameters,
-    TakeScreenshotParameters, ActionsParameters, Action, PauseAction, KeyAction,
-    PointerAction, KeyActionType, PointerActionType};
+    TakeScreenshotParameters, ActionsParameters, ActionSequence, ActionItem,
+    KeyActionItem, PointerActionItem, GeneralAction, PauseAction, KeyAction,
+    PointerAction, KeyUpAction, KeyDownAction, PointerUpAction, PointerDownAction,
+    PointerMoveAction};
 use webdriver::response::{
     WebDriverResponse, NewSessionResponse, ValueResponse, WindowSizeResponse,
     ElementRectResponse, CookieResponse, Cookie};
@@ -127,7 +129,7 @@ trait ToMarionette {
 
 // Trait for converting sub-parts of commands to marionette data
 trait ToMarionetteJson {
-    fn to_marionette_json(&self) -> Json;
+    fn to_marionette_json(&self) -> WebDriverResult<Json>;
 }
 
 pub fn extension_routes() -> Vec<(Method, &'static str, GeckoExtensionRoute)> {
@@ -555,7 +557,7 @@ impl MarionetteSession {
             SetWindowSize(_) | MaximizeWindow | SwitchToWindow(_) | SwitchToFrame(_) |
             SwitchToParentFrame | AddCookie(_) | DeleteCookies | DeleteCookie(_) |
             DismissAlert | AcceptAlert | SendAlertText(_) | ElementClick(_) |
-            ElementTap(_) | ElementClear(_) | ElementSendKeys(_, _) => {
+            ElementTap(_) | ElementClear(_) | ElementSendKeys(_, _) | DeleteActions => {
                 WebDriverResponse::Void
             },
             //Things that simply return the contents of the marionette "value" property
@@ -653,6 +655,14 @@ impl MarionetteSession {
                              ErrorStatus::UnknownError,
                              "Failed to find value field")));
                 WebDriverResponse::Generic(ValueResponse::new(element.to_json()))
+            },
+            PerformActions(_) => {
+                WebDriverResponse::Generic(ValueResponse::new(
+                    match resp.result.find("value") {
+                        Some(id) => vec![id.to_json()],
+                        // This is not what we want, ideally
+                        None => vec![]
+                    }.to_json()))
             },
             NewSession(_) => {
                 let mut session_id = try_opt!(
@@ -869,6 +879,16 @@ impl MarionetteCommand {
                 (Some("deleteCookie"), Some(Ok(data)))
             },
             AddCookie(ref x) => (Some("addCookie"), Some(x.to_marionette())),
+            PerformActions(ref x) => {
+                let command = if x.actions.len() == 1 {
+                    "actionChain"
+                } else {
+                    "multiAction"
+                };
+                (Some(command), Some(x.to_marionette()))
+            },
+            // Marionette doesn't have a delete actions equivalent yet
+            DeleteActions => (None, None),
             DismissAlert => (Some("dismissDialog"), None),
             AcceptAlert => (Some("acceptDialog"), None),
             GetAlertText => (Some("getTextFromDialog"), None),
@@ -1292,49 +1312,152 @@ impl ToMarionette for TakeScreenshotParameters {
 impl ToMarionette for ActionsParameters {
     fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>> {
         let mut data = BTreeMap::new();
-        let key = if (self.actions.len() == 1) {
+        if self.actions.len() == 1 {
             data.insert("nextId".to_owned(),
-                        Json::Null);
-            "chain"
+                        self.actions[0].id.to_json());
+            data.insert("chain".into(),
+                        try!(self.actions[0].actions
+                             .iter()
+                             .map(|y| y.to_marionette_json())
+                             .collect::<WebDriverResult<Vec<Json>>>())
+                        .to_json());
         } else {
-            let max_length = self.actions.map(|x| x.len()).max().to_json();
-            data.insert("max_length", max_length);
-            "value"
-        };
-        data.insert(key.into(),
-                    self.actions.map(|x| {
-                        Json::Array(x.map(|y| Json::Object(y.to_marionette_json())))
-                    }))
+            let max_length = self.actions.iter().map(|x| x.actions.len()).max().to_json();
+            data.insert("max_length".into(), max_length);
+            data.insert("multiAction".into(),
+                        try!(self.actions
+                             .iter()
+                             .map(|x|
+                                  x.actions
+                                  .iter()
+                                  .map(|y| y.to_marionette_json())
+                                  .collect::<WebDriverResult<Vec<Json>>>())
+                             .collect::<WebDriverResult<Vec<Vec<Json>>>>())
+                        .iter().map(|x| x.to_json()).collect::<Vec<Json>>().to_json());
+        }
+        Ok(data)
     }
 }
 
-impl ToMarionetteJson for Action {
-    fn to_marionette_json(&self) -> Json {
+impl ToMarionetteJson for ActionSequence {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        Ok(try!(self.actions.iter()
+                .map(|x| x.to_marionette_json())
+                .collect::<WebDriverResult<Vec<Json>>>()).to_json())
+    }
+}
+
+impl ToMarionetteJson for ActionItem {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
         match self {
-            &Action::Pause(x) => x.to_marionette_json(),
-            &Action::Key(x) => x.to_marionette_json(),
-            &Action::Pointer(x) => x.to_marionette_json(),
+            &ActionItem::Key(ref x) => x.to_marionette_json(),
+            &ActionItem::Pointer(ref x) => x.to_marionette_json(),
+        }
+    }
+}
+
+impl ToMarionetteJson for KeyActionItem {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        match self {
+            &KeyActionItem::General(ref x) => x.to_marionette_json(),
+            &KeyActionItem::Key(ref x) => x.to_marionette_json()
+        }
+    }
+}
+
+impl ToMarionetteJson for PointerActionItem {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        match self {
+            &PointerActionItem::General(ref x) => x.to_marionette_json(),
+            &PointerActionItem::Pointer(ref x) => x.to_marionette_json()
+        }
+    }
+}
+
+impl ToMarionetteJson for GeneralAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        match self {
+            &GeneralAction::Pause(ref x) => x.to_marionette_json(),
         }
     }
 }
 
 impl ToMarionetteJson for PauseAction {
-    fn to_marionette_json(&self) -> Json {
-        let data = vec!["wait".to_owned().to_json(), self.duration.to_json()];
-        Json::Array(data)
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        Ok(vec!["wait".to_json(), self.duration.to_json()].to_json())
     }
 }
 
 impl ToMarionetteJson for KeyAction {
-    fn to_marionette_json(&self) -> Json {
-        let action_type = match self.action_type {
-            KeyActionType::Up => "keyUp",
-            KeyActionType::Down => "keyDown",
-        }.to_owned().to_json();
-        let value = String::with_capacity(1);
-        value.push(self.value);
-        let data = vec![action_type, value.to_json()];
-        Json::Array(data)
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        match self {
+            &KeyAction::Up(ref x) => x.to_marionette_json(),
+            &KeyAction::Down(ref x) => x.to_marionette_json(),
+        }
+    }
+}
+
+impl ToMarionetteJson for KeyUpAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        Ok(vec!["keyUp".to_json(), self.value.to_string().to_json()].to_json())
+    }
+}
+
+impl ToMarionetteJson for KeyDownAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        Ok(vec!["keyDown".to_json(), self.value.to_string().to_json()].to_json())
+    }
+}
+
+impl ToMarionetteJson for PointerAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        match self {
+            &PointerAction::Up(ref x) => x.to_marionette_json(),
+            &PointerAction::Down(ref x) => x.to_marionette_json(),
+            &PointerAction::Move(ref x) => x.to_marionette_json(),
+            &PointerAction::Cancel => {
+                Ok(vec!["cancel".to_json()].to_json())
+            }
+        }
+    }
+}
+
+impl ToMarionetteJson for PointerUpAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        Ok(vec!["release".to_json()].to_json())
+    }
+}
+
+impl ToMarionetteJson for PointerDownAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        if self.element.is_null() {
+            return Err(WebDriverError::new(
+                ErrorStatus::UnsupportedOperation,
+                "Must provide element to use as origin for coordinates."));
+        }
+        Ok(vec!["press".to_json(),
+                Json::Object(try!(self.element.to_marionette())),
+                self.x.to_json(),
+                self.y.to_json()].to_json())
+    }
+}
+
+impl ToMarionetteJson for PointerMoveAction {
+    fn to_marionette_json(&self) -> WebDriverResult<Json> {
+        if self.element.is_value() {
+            if !(self.x.is_null() && self.y.is_null()) {
+                return Err(WebDriverError::new(
+                    ErrorStatus::UnsupportedOperation,
+                    "Providing element and coordinates for pointerMove is not supported."));
+            };
+            Ok(vec!["move".to_json(),
+                    Json::Object(try!(self.element.to_marionette()))].to_json())
+        } else {
+            
+            Ok(vec!["moveByOffset".to_json(),
+                    self.x.to_json(),
+                    self.y.to_json()].to_json())
+        }
     }
 }
 
