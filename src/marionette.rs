@@ -121,20 +121,25 @@ lazy_static! {
 
 pub fn extension_routes() -> Vec<(Method, &'static str, GeckoExtensionRoute)> {
     return vec![(Method::Get, "/session/{sessionId}/moz/context", GeckoExtensionRoute::GetContext),
-                (Method::Post, "/session/{sessionId}/moz/context", GeckoExtensionRoute::SetContext)]
+                (Method::Post, "/session/{sessionId}/moz/context", GeckoExtensionRoute::SetContext),
+                (Method::Post, "/session/{sessionId}/moz/xbl/{elementId}/anonymous_children", GeckoExtensionRoute::XblAnonymousChildren),
+                (Method::Post, "/session/{sessionId}/moz/xbl/{elementId}/anonymous_by_attribute", GeckoExtensionRoute::XblAnonymousByAttribute),
+]
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum GeckoExtensionRoute {
     GetContext,
-    SetContext
+    SetContext,
+    XblAnonymousChildren,
+    XblAnonymousByAttribute,
 }
 
 impl WebDriverExtensionRoute for GeckoExtensionRoute {
     type Command = GeckoExtensionCommand;
 
     fn command(&self,
-               _captures: &Captures,
+               captures: &Captures,
                body_data: &Json) -> WebDriverResult<WebDriverCommand<GeckoExtensionCommand>> {
         let command = match self {
             &GeckoExtensionRoute::GetContext => {
@@ -143,6 +148,21 @@ impl WebDriverExtensionRoute for GeckoExtensionRoute {
             &GeckoExtensionRoute::SetContext => {
                 let parameters: GeckoContextParameters = try!(Parameters::from_json(&body_data));
                 GeckoExtensionCommand::SetContext(parameters)
+            },
+            &GeckoExtensionRoute::XblAnonymousChildren => {
+                let element_id = try!(captures.name("elementId")
+                                      .ok_or(WebDriverError::new(
+                                          ErrorStatus::InvalidArgument,
+                                          "Missing elementId parameter")));
+                GeckoExtensionCommand::XblAnonymousChildren(element_id.into())
+            },
+            &GeckoExtensionRoute::XblAnonymousByAttribute => {
+                let element_id = try!(captures.name("elementId")
+                                      .ok_or(WebDriverError::new(
+                                          ErrorStatus::InvalidArgument,
+                                          "Missing elementId parameter")));
+                let parameters: AttributeParameters = try!(Parameters::from_json(&body_data));
+                GeckoExtensionCommand::XblAnonymousByAttribute(element_id.into(), parameters)
             }
         };
         Ok(WebDriverCommand::Extension(command))
@@ -153,6 +173,8 @@ impl WebDriverExtensionRoute for GeckoExtensionRoute {
 pub enum GeckoExtensionCommand {
     GetContext,
     SetContext(GeckoContextParameters),
+    XblAnonymousChildren(WebElement),
+    XblAnonymousByAttribute(WebElement, AttributeParameters),
 }
 
 impl WebDriverExtensionCommand for GeckoExtensionCommand {
@@ -160,6 +182,8 @@ impl WebDriverExtensionCommand for GeckoExtensionCommand {
         match self {
             &GeckoExtensionCommand::GetContext => None,
             &GeckoExtensionCommand::SetContext(ref x) => Some(x.to_json()),
+            &GeckoExtensionCommand::XblAnonymousChildren(_) => None,
+            &GeckoExtensionCommand::XblAnonymousByAttribute(_, ref x) => Some(x.to_json()),
         }
     }
 }
@@ -209,6 +233,14 @@ impl Parameters for GeckoContextParameters {
     }
 }
 
+impl ToMarionette for GeckoContextParameters {
+    fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>> {
+        let mut data = BTreeMap::new();
+        data.insert("value".to_owned(), self.context.to_json());
+        Ok(data)
+    }
+}
+
 impl ToJson for GeckoContextParameters {
     fn to_json(&self) -> Json {
         let mut data = BTreeMap::new();
@@ -217,10 +249,51 @@ impl ToJson for GeckoContextParameters {
     }
 }
 
-impl ToMarionette for GeckoContextParameters {
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttributeParameters {
+    name: String,
+    value: String
+}
+
+impl Parameters for AttributeParameters {
+    fn from_json(body: &Json) -> WebDriverResult<AttributeParameters> {
+        let data = try!(body.as_object().ok_or(
+            WebDriverError::new(ErrorStatus::InvalidArgument,
+                                "Message body was not an object")));
+        let name = try!(try!(data.get("name").ok_or(
+            WebDriverError::new(ErrorStatus::InvalidArgument,
+                                "Missing 'name' parameter"))).as_string().
+                            ok_or(WebDriverError::new(ErrorStatus::InvalidArgument,
+                                                      "'name' parameter is not a string")));
+        let value = try!(try!(data.get("value").ok_or(
+            WebDriverError::new(ErrorStatus::InvalidArgument,
+                                "Missing 'value' parameter"))).as_string().
+                            ok_or(WebDriverError::new(ErrorStatus::InvalidArgument,
+                                                      "'value' parameter is not a string")));
+        Ok(AttributeParameters {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        })
+    }
+}
+
+impl ToJson for AttributeParameters {
+    fn to_json(&self) -> Json {
+        let mut data = BTreeMap::new();
+        data.insert("name".to_owned(), self.name.to_json());
+        data.insert("value".to_owned(), self.value.to_json());
+        Json::Object(data)
+    }
+}
+
+impl ToMarionette for AttributeParameters {
     fn to_marionette(&self) -> WebDriverResult<BTreeMap<String, Json>> {
         let mut data = BTreeMap::new();
-        data.insert("value".to_owned(), self.context.to_json());
+        data.insert("using".to_owned(), "anon attribute".to_json());
+        let mut value = BTreeMap::new();
+        value.insert(self.name.to_owned(), self.value.to_json());
+        data.insert("value".to_owned(), Json::Object(value));
         Ok(data)
     }
 }
@@ -652,8 +725,20 @@ impl MarionetteSession {
                                              ErrorStatus::UnknownError,
                                              "Failed to find value field");
                         WebDriverResponse::Generic(ValueResponse::new(value.clone()))
+                    },
+                    &GeckoExtensionCommand::SetContext(_) => WebDriverResponse::Void,
+                    &GeckoExtensionCommand::XblAnonymousChildren(_) => {
+                        let value = try_opt!(resp.result.find("value"),
+                                             ErrorStatus::UnknownError,
+                                             "Failed to find value field");
+                        WebDriverResponse::Generic(ValueResponse::new(value.clone()))
+                    },
+                    &GeckoExtensionCommand::XblAnonymousByAttribute(_, _) => {
+                        let value = try_opt!(resp.result.find("value"),
+                                             ErrorStatus::UnknownError,
+                                             "Failed to find value field");
+                        WebDriverResponse::Generic(ValueResponse::new(value.clone()))
                     }
-                    &GeckoExtensionCommand::SetContext(_) => WebDriverResponse::Void
                 }
             }
         })
@@ -855,6 +940,18 @@ impl MarionetteCommand {
                     &GeckoExtensionCommand::GetContext => (Some("getContext"), None),
                     &GeckoExtensionCommand::SetContext(ref x) => {
                         (Some("setContext"), Some(x.to_marionette()))
+                    },
+                    &GeckoExtensionCommand::XblAnonymousChildren(ref e) => {
+                        let mut data = BTreeMap::new();
+                        data.insert("using".to_owned(), "anon".to_json());
+                        data.insert("value".to_owned(), Json::Null);
+                        data.insert("element".to_string(), e.id.to_json());
+                        (Some("findElements"), Some(Ok(data)))
+                    },
+                    &GeckoExtensionCommand::XblAnonymousByAttribute(ref e, ref x) => {
+                        let mut data = try!(x.to_marionette());
+                        data.insert("element".to_string(), e.id.to_json());
+                        (Some("findElement"), Some(Ok(data)))
                     }
                 }
             }
