@@ -339,7 +339,7 @@ impl MarionetteHandler {
         return Ok(None);
     }
 
-    let file_name = String::from(profile_opt.unwrap().to_string());
+    let file_name = profile_opt.unwrap().to_string();
 
       let profile_path = {
             let name = &file_name;
