@@ -334,16 +334,21 @@ impl MarionetteHandler {
 
     pub fn load_profile_from_path(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
 
-    let profile_path = {
-        let name = "c:\\Users\\hunter.stern\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\y0ti3c7h.google-two-factor";
-        let rel_path = Path::new(name);
+    let profile_opt = capabilities.get("firefox_profile_path");
+    if profile_opt.is_none() {
+        return Ok(None);
+    }
 
-        Some(rel_path)
-    };
+    let file_name = String::from(profile_opt.unwrap().to_string());
 
+      let profile_path = {
+            let name = &file_name;
+            let rel_path = Path::new(name);
 
+            Some(rel_path)
+        };
 
-  let profile = try!(Profile::new(profile_path));
+        let profile = try!(Profile::new(profile_path));
 
         Ok(Some(profile))
 
