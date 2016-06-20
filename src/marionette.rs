@@ -268,8 +268,13 @@ impl MarionetteHandler {
     fn create_connection(&mut self, session_id: &Option<String>,
                          capabilities: &NewSessionParameters) -> WebDriverResult<()> {
         debug!("create_connection");
-        let profile = try!(self.load_profile(capabilities));
-        let args = try!(self.load_browser_args(capabilities));
+        let mut profile = try!(self.load_profile(capabilities));
+
+	       if profile.is_none() {
+            profile = try!(self.load_profile_from_path(capabilities));
+	      }
+
+	let args = try!(self.load_browser_args(capabilities));
         match self.start_browser(profile, args) {
             Err(e) => {
                 return Err(WebDriverError::new(ErrorStatus::UnknownError,
@@ -325,6 +330,28 @@ impl MarionetteHandler {
         };
         try!(prefs.write());
         Ok(())
+    }
+
+    pub fn load_profile_from_path(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
+
+    let profile_path = {
+        let name = "/Users/hunter.stern/AppData/Roaming/Mozilla/Firefox/Profiles/y0ti3c7h.google-two-factor/";
+        let is_dir = name.ends_with("/");
+        let rel_path = Path::new(name);
+
+        if is_dir {
+            None
+        } else {
+            Some(rel_path)
+        }
+    };
+
+
+
+  let profile = try!(Profile::new(profile_path));
+
+        Ok(Some(profile))
+
     }
 
     pub fn load_profile(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
