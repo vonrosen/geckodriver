@@ -335,15 +335,10 @@ impl MarionetteHandler {
     pub fn load_profile_from_path(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
 
     let profile_path = {
-        let name = "/Users/hunter.stern/AppData/Roaming/Mozilla/Firefox/Profiles/y0ti3c7h.google-two-factor/";
-        let is_dir = name.ends_with("/");
+        let name = "c:\\Users\\hunter.stern\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\y0ti3c7h.google-two-factor";
         let rel_path = Path::new(name);
 
-        if is_dir {
-            None
-        } else {
-            Some(rel_path)
-        }
+        Some(rel_path)
     };
 
 
