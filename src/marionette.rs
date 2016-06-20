@@ -339,16 +339,20 @@ impl MarionetteHandler {
         return Ok(None);
     }
 
-    let file_name = profile_opt.unwrap().to_string();
+    let file_name = &profile_opt.unwrap().to_string();
 
-      let profile_path = {
-            let name = &file_name;
-            let rel_path = Path::new(name);
+      let mut profile_path = {
+            //let name = "init";
+            //let rel_path = Path::new(name);
 
-            Some(rel_path)
+            Some(Path::new(file_name))
         };
 
+        //profile_path.p = file_name;
+
         let profile = try!(Profile::new(profile_path));
+        //let profile = try!(Profile::new(Option(Path::new(&file_name))));
+
 
         Ok(Some(profile))
 
