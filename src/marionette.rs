@@ -340,7 +340,9 @@ impl MarionetteHandler {
     }
 
     //let file_name = profile_opt.unwrap().to_string();
-    debug!("aa");
+    println!("hello there!");
+
+    println!("format {} arguments", profile_opt.unwrap());
 
     try!(profile_opt.unwrap().as_string().ok_or(WebDriverError::new(
         ErrorStatus::UnknownError,
