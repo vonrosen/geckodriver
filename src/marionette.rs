@@ -268,7 +268,13 @@ impl MarionetteHandler {
     fn create_connection(&mut self, session_id: &Option<String>,
                          capabilities: &NewSessionParameters) -> WebDriverResult<()> {
         debug!("create_connection");
-        let profile = try!(self.load_profile(capabilities));
+        let mut profile = try!(self.load_profile(capabilities));
+
+        let profile_opt = capabilities.get("firefox_profile_path");
+        if !profile_opt.is_none() {
+            profile = try!(self.load_profile_from_path(capabilities));
+        }
+
         let args = try!(self.load_browser_args(capabilities));
         match self.start_browser(profile, args) {
             Err(e) => {
@@ -344,6 +350,25 @@ impl MarionetteHandler {
         try!(unzip_buffer(profile_zip,
                           profile.temp_dir.as_ref().expect("Profile doesn't have a path").path()));
         // TODO - Stop mozprofile erroring if user.js already exists
+        Ok(Some(profile))
+    }
+
+    pub fn load_profile_from_path(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
+         // TODO: fix this so path is not hardcoded. passing param from capabilities did not work. results in exception in write method of prefreader.rs::serialize
+         // of https://github.com/jgraham/rust_mozprofile project
+         let profile_path = {
+             let name = "C:\\Users\\hunter.stern\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\y0ti3c7h.google-two-factor";
+             let is_dir = name.ends_with("/");
+             let rel_path = Path::new(name);
+
+             if is_dir {
+                 None
+            } else {
+                 Some(rel_path)
+            }
+        };
+
+        let profile = try!(Profile::new(profile_path));
         Ok(Some(profile))
     }
 
