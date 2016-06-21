@@ -270,9 +270,10 @@ impl MarionetteHandler {
         debug!("create_connection");
         let mut profile = try!(self.load_profile(capabilities));
 
-	       if profile.is_none() {
+        let profile_opt = capabilities.get("firefox_profile_path");
+        if !profile_opt.is_none() {
             profile = try!(self.load_profile_from_path(capabilities));
-	      }
+        }
 
         println!("made it!!");
 
@@ -370,22 +371,10 @@ println!("x2made it!!");
 
     pub fn load_profile_from_path(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
 
-    let profile_opt = capabilities.get("firefox_profile_path");
-    if profile_opt.is_none() {
-        return Ok(None);
-    }
 
-    let file_name = profile_opt.unwrap().to_string();
-
-    println!("!!!!!!!!!!!!!AAA {} arguments", profile_opt.unwrap());
-
-
-      //let profile_path = {
-        //    Some(Path::new(&file_name.to_string()))
-         //};
 
          let profile_path = {
-                 let name = &file_name;
+                 let name = "C:\\Users\\hunter.stern\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\y0ti3c7h.google-two-factor";
                  let is_dir = name.ends_with("/");
                  let rel_path = Path::new(name);
 
@@ -396,19 +385,12 @@ println!("x2made it!!");
                 }
             };
 
-        //profile_path.p = file_name;
 
-        //let profile = try!(Profile::new(None));
-        //profile.path = profile_path;
-
-        //let profile = try!(Profile::new(env::current_dir().unwrap()));
-        //println!("!!!!!!!!!!!!!AAA {} BBBBBBBB", Path::new(&file_name.to_string()).display());
 
 
         let profile = try!(Profile::new(profile_path));
-        //let profile = try!(Profile::new(Some(Path::new(&file_name.to_string()))));
 
-        println!("hey!!");
+
 
         Ok(Some(profile))
 
