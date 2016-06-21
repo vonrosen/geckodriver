@@ -277,6 +277,9 @@ impl MarionetteHandler {
         println!("made it!!");
 
 	let args = try!(self.load_browser_args(capabilities));
+
+  println!("2made it!!");
+
         match self.start_browser(profile, args) {
             Err(e) => {
                 return Err(WebDriverError::new(ErrorStatus::UnknownError,
@@ -284,12 +287,17 @@ impl MarionetteHandler {
             },
             Ok(_) => {}
         }
+
+        println!("34made it!!");
         debug!("Creating connection");
         let mut connection = MarionetteConnection::new(self.port, session_id.clone());
+        println!("4made it!!");
         debug!("Starting marionette connection");
         try!(connection.connect());
+        println!("5made it!!");
         debug!("Marionette connection started");
         self.connection = Mutex::new(Some(connection));
+        println!("6made it!!");
         Ok(())
     }
 
