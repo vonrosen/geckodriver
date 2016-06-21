@@ -339,18 +339,21 @@ impl MarionetteHandler {
         return Ok(None);
     }
 
-    let file_name = &profile_opt.unwrap().to_string();
+    //let file_name = profile_opt.unwrap().to_string();
 
-      let mut profile_path = {
-            //let name = "init";
-            //let rel_path = Path::new(name);
+    WebDriverError::new(
+        ErrorStatus::UnknownError,
+        profile_opt.unwrap().to_string());
 
-            Some(Path::new(file_name))
-        };
+      //let profile_path = {
+        //    Some(Path::new(file_name))
+        // };
 
         //profile_path.p = file_name;
 
-        let profile = try!(Profile::new(profile_path));
+        let profile = try!(Profile::new(None));
+        //profile.path = profile_path;
+        //let profile = try!(Profile::new(profile_path));
         //let profile = try!(Profile::new(Option(Path::new(&file_name))));
 
 
