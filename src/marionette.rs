@@ -274,6 +274,8 @@ impl MarionetteHandler {
             profile = try!(self.load_profile_from_path(capabilities));
 	      }
 
+        println!("made it!!");
+
 	let args = try!(self.load_browser_args(capabilities));
         match self.start_browser(profile, args) {
             Err(e) => {
