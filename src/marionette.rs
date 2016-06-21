@@ -375,14 +375,26 @@ println!("x2made it!!");
         return Ok(None);
     }
 
-    let file_name = profile_opt.unwrap();
+    let file_name = profile_opt.unwrap().to_string();
 
     println!("!!!!!!!!!!!!!AAA {} arguments", profile_opt.unwrap());
 
 
       //let profile_path = {
         //    Some(Path::new(&file_name.to_string()))
-        // };
+         //};
+
+         let profile_path = {
+                 let name = &file_name;
+                 let is_dir = name.ends_with("/");
+                 let rel_path = Path::new(name);
+
+                 if is_dir {
+                     None
+                } else {
+                     Some(rel_path)
+                }
+            };
 
         //profile_path.p = file_name;
 
@@ -390,11 +402,11 @@ println!("x2made it!!");
         //profile.path = profile_path;
 
         //let profile = try!(Profile::new(env::current_dir().unwrap()));
-        println!("!!!!!!!!!!!!!AAA {} BBBBBBBB", Path::new(&file_name.to_string()).display());
+        //println!("!!!!!!!!!!!!!AAA {} BBBBBBBB", Path::new(&file_name.to_string()).display());
 
 
-
-        let profile = try!(Profile::new(Some(Path::new(&file_name.to_string()))));
+        let profile = try!(Profile::new(profile_path));
+        //let profile = try!(Profile::new(Some(Path::new(&file_name.to_string()))));
 
         println!("hey!!");
 
