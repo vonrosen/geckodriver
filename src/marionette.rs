@@ -342,11 +342,18 @@ println!("x2made it!!");
 
     pub fn set_prefs(&self, profile: &mut Profile, custom_profile: bool)
                  -> Result<(), RunnerError> {
+
+
+                   println!("1AAAA");
         let prefs = try!(profile.user_prefs());
+        println!("2AAAA");
         prefs.insert("marionette.defaultPrefs.port",
                      Pref::new(self.port as i64));
 
+                     println!("3AAAA");
+
         prefs.insert_slice(&FIREFOX_REQUIRED_PREFERENCES[..]);
+        println!("4AAAA");
         if !custom_profile {
             prefs.insert_slice(&FIREFOX_DEFAULT_PREFERENCES[..]);
             if self.e10s {
@@ -355,7 +362,9 @@ println!("x2made it!!");
                 prefs.insert_slice(&NON_E10S_PREFERENCES[..]);
             }
         };
+        println!("5AAAA");
         try!(prefs.write());
+        println!("6AAAA");
         Ok(())
     }
 
