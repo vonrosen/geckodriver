@@ -1,3 +1,4 @@
+use std::env;
 use hyper::method::Method;
 use mozprofile::preferences::Pref;
 use mozprofile::profile::Profile;
@@ -339,25 +340,26 @@ impl MarionetteHandler {
         return Ok(None);
     }
 
-    //let file_name = profile_opt.unwrap().to_string();
-    println!("hello there!");
+    let file_name = profile_opt.unwrap();
 
-    println!("format {} arguments", profile_opt.unwrap());
+    println!("!!!!!!!!!!!!!AAA {} arguments", profile_opt.unwrap());
 
-    try!(profile_opt.unwrap().as_string().ok_or(WebDriverError::new(
-        ErrorStatus::UnknownError,
-        profile_opt.unwrap().to_string())));
 
       //let profile_path = {
-        //    Some(Path::new(file_name))
+        //    Some(Path::new(&file_name.to_string()))
         // };
 
         //profile_path.p = file_name;
 
-        let profile = try!(Profile::new(None));
+        //let profile = try!(Profile::new(None));
         //profile.path = profile_path;
-        //let profile = try!(Profile::new(profile_path));
-        //let profile = try!(Profile::new(Option(Path::new(&file_name))));
+
+        //let profile = try!(Profile::new(env::current_dir().unwrap()));
+        println!("!!!!!!!!!!!!!AAA {} BBBBBBBB", Path::new(&file_name.to_string()).display());
+
+
+
+        let profile = try!(Profile::new(Some(Path::new(&file_name.to_string()))));
 
 
         Ok(Some(profile))
