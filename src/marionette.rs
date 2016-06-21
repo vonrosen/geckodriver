@@ -302,18 +302,35 @@ impl MarionetteHandler {
     }
 
     fn start_browser(&mut self, profile: Option<Profile>, args: Option<Vec<String>>) -> Result<(), RunnerError> {
+
+println!("x2made it!!");
         let custom_profile = profile.is_some();
+        println!("x3made it!!");
 
         match self.launcher {
             BrowserLauncher::BinaryLauncher(ref binary) => {
+            println!("x4made it!!");
+
                 let mut runner = try!(FirefoxRunner::new(&binary, profile));
+                println!("x5made it!!");
+
                 if let Some(cmd_args) = args {
                     runner.args().extend(cmd_args);
                 };
+
+                println!("x6made it!!");
+
+
                 try!(self.set_prefs(&mut runner.profile, custom_profile));
+                println!("x7made it!!");
+
                 try!(runner.start());
+                println!("x8made it!!");
+
 
                 self.browser = Some(runner);
+                println!("92made it!!");
+
 
                 debug!("Browser started");
             },
