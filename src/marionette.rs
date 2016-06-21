@@ -370,9 +370,6 @@ println!("x2made it!!");
     }
 
     pub fn load_profile_from_path(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
-
-
-
          let profile_path = {
                  let name = "C:\\Users\\hunter.stern\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\y0ti3c7h.google-two-factor";
                  let is_dir = name.ends_with("/");
@@ -385,15 +382,8 @@ println!("x2made it!!");
                 }
             };
 
-
-
-
         let profile = try!(Profile::new(profile_path));
-
-
-
         Ok(Some(profile))
-
     }
 
     pub fn load_profile(&self, capabilities: &NewSessionParameters) -> WebDriverResult<Option<Profile>> {
@@ -407,7 +397,12 @@ println!("x2made it!!");
             WebDriverError::new(
                 ErrorStatus::UnknownError,
                 "Profile was not a string")));
+
+
+
         let profile_zip = &*try!(profile_base64.from_base64());
+
+
         // Create an emtpy profile directory
         let profile = try!(Profile::new(None));
         try!(unzip_buffer(profile_zip,
