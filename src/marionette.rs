@@ -1,4 +1,3 @@
-use std::env;
 use hyper::method::Method;
 use mozprofile::preferences::Pref;
 use mozprofile::profile::Profile;
@@ -361,6 +360,7 @@ impl MarionetteHandler {
 
         let profile = try!(Profile::new(Some(Path::new(&file_name.to_string()))));
 
+        println!("hey!!");
 
         Ok(Some(profile))
 
