@@ -340,10 +340,11 @@ impl MarionetteHandler {
     }
 
     //let file_name = profile_opt.unwrap().to_string();
+    debug!("aa");
 
-    WebDriverError::new(
+    try!(profile_opt.unwrap().as_string().ok_or(WebDriverError::new(
         ErrorStatus::UnknownError,
-        profile_opt.unwrap().to_string());
+        profile_opt.unwrap().to_string())));
 
       //let profile_path = {
         //    Some(Path::new(file_name))
